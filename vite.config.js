@@ -11,7 +11,7 @@ export default defineConfig({
     port: 5173,
   },
   build: {
-    target: 'es2020',
+    target: 'es2022',
     rollupOptions: {
       input: {
         main: resolve(rootDir, 'index.html'),
