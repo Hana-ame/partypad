@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>PartyPad · PeerJS 派对游戏手柄与适配层</title>
+  <link rel="stylesheet" href="./src/ui/style.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Role Selection Screen -->
+    <section id="view-home" class="view active">
+      <div class="home-wrap">
+        <h1>PartyPad</h1>
+        <p class="subtitle">纯 PeerJS 扫码 / 房间码直连 · 可选 KCP 传输 · 可改布局手柄 + 体感 + 私人文本下发</p>
+        <div class="role-grid">
+          <button id="btn-go-host" class="role-card primary">
+            <span class="role-title">我是大屏 / 服务端控制台</span>
+            <span class="role-desc">创建房间、生成二维码与 5 位房间码、切换手柄布局并向指定玩家下发私密文本</span>
+          </button>
+          <button id="btn-go-pad" class="role-card">
+            <span class="role-title">我是手机手柄</span>
+            <span class="role-desc">扫码或输入房间码加入、触控 + 体感 IMU、自由拖拽修改布局、按住查看私密卡片</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Host Dashboard Screen -->
+    <section id="view-host" class="view">
+      <header class="topbar">
+        <div class="brand">PartyPad Host</div>
+        <div class="topbar-actions">
+          <label class="inline-opt">
+            传输层
+            <select id="host-transport">
+              <option value="dual-dc">Dual-Channel WebRTC（默认）</option>
+              <option value="kcp">KCP over Unreliable DC（可选优化）</option>
+            </select>
+          </label>
+          <button id="host-new-room" class="btn">重建房间</button>
+          <button id="host-back" class="btn ghost">返回</button>
+        </div>
+      </header>
+
+      <div class="host-layout">
+        <aside class="host-sidebar">
+          <div class="panel">
+            <h3>扫码或输码加入（无 MQTT）</h3>
+            <div class="qr-box">
+              <canvas id="host-qr"></canvas>
+            </div>
+            <div class="code-row">
+              <span class="code-label">房间码</span>
+              <strong id="host-code" class="room-code">-----</strong>
+            </div>
+            <p id="host-status" class="muted">正在连接 PeerJS 信令…</p>
+          </div>
+
+          <div class="panel">
+            <h3>全局切换手柄布局</h3>
+            <div class="btn-group">
+              <button class="btn layout-btn" data-layout="action_gamepad">动作双区手柄</button>
+              <button class="btn layout-btn" data-layout="motion_party">体感 + 技能键</button>
+              <button class="btn layout-btn" data-layout="party_quiz">派对抢答 / 投票</button>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h3>向指定玩家下发私人文本</h3>
+            <select id="pm-target" class="input"></select>
+            <input id="pm-title" class="input" placeholder="标题（如：你的秘密身份）" value="秘密身份" />
+            <textarea id="pm-body" class="input" rows="3" placeholder="仅该玩家手机可见的文本内容…">你是本局的【卧底】，关键词：奶茶</textarea>
+            <label class="check-row">
+              <input id="pm-secret" type="checkbox" checked />
+              防偷窥模式（按住屏幕才显露文本）
+            </label>
+            <button id="pm-send" class="btn primary full">下发私人信息</button>
+          </div>
+        </aside>
+
+        <main class="host-main">
+          <div class="panel">
+            <h3>已连接玩家（实时输入 / 体感遥测）</h3>
+            <div id="host-players" class="players-grid">
+              <div class="muted">等待手机扫码或输入房间码加入…</div>
+            </div>
+          </div>
+          <div class="panel">
+            <h3>事件日志（ServerBridgeAdapter 输出预览）</h3>
+            <pre id="host-log" class="log-box"></pre>
+          </div>
+        </main>
+      </div>
+    </section>
+
+    <!-- Mobile Join Screen -->
+    <section id="view-join" class="view">
+      <div class="join-card">
+        <h2>加入派对房间</h2>
+        <p class="muted">仅通过扫码或手动输入 5 位房间码直连 Host</p>
+        <input id="join-code" class="input code-input" maxlength="5" placeholder="5 位房间码" autocomplete="off" />
+        <input id="join-name" class="input" maxlength="16" placeholder="你的昵称（可选）" />
+        <label class="inline-opt full">
+          传输协议
+          <select id="join-transport">
+            <option value="dual-dc">Dual-Channel WebRTC（默认）</option>
+            <option value="kcp">KCP over Unreliable DC</option>
+          </select>
+        </label>
+        <button id="join-submit" class="btn primary full">连接手柄</button>
+        <p id="join-error" class="error-text"></p>
+        <button id="join-back" class="btn ghost full">返回</button>
+      </div>
+    </section>
+
+    <!-- Mobile Active Controller Screen -->
+    <section id="view-pad" class="view">
+      <header class="pad-bar">
+        <div class="pad-info">
+          <span id="pad-room-badge" class="badge">-----</span>
+          <span id="pad-ping" class="badge muted-badge">-- ms</span>
+        </div>
+        <div class="pad-tools">
+          <button id="pad-imu-toggle" class="btn sm">体感: 关</button>
+          <button id="pad-imu-calib" class="btn sm hidden">校准正面</button>
+          <button id="pad-edit-toggle" class="btn sm">编辑布局</button>
+          <button id="pad-mirror" class="btn sm hidden">镜像</button>
+          <button id="pad-reset-layout" class="btn sm hidden">重置</button>
+          <button id="pad-leave" class="btn sm ghost">退出</button>
+        </div>
+      </header>
+
+      <!-- Private Message Banner / Hold-to-Reveal Card -->
+      <div id="pad-private-box" class="private-box hidden"></div>
+
+      <!-- Dynamic Touch Stage -->
+      <div id="pad-stage" class="pad-stage"></div>
+    </section>
+  </div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
