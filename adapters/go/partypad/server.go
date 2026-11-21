@@ -33,6 +33,12 @@ type InboundEvent struct {
 	ID       string          `json:"id,omitempty"`
 	Value    json.RawMessage `json:"value,omitempty"`
 	MsgID    string          `json:"msgId,omitempty"`
+	Op       int             `json:"op,omitempty"`
+	X        float32         `json:"x,omitempty"`
+	Y        float32         `json:"y,omitempty"`
+	Color    string          `json:"color,omitempty"`
+	Width    int             `json:"width,omitempty"`
+	StrokeID int             `json:"strokeId,omitempty"`
 }
 
 type Handlers struct {
@@ -41,6 +47,7 @@ type Handlers struct {
 	OnInput       func(ev InboundEvent)
 	OnMotion      func(ev InboundEvent)
 	OnAction      func(ev InboundEvent)
+	OnDraw        func(ev InboundEvent)
 	OnPrivateAck  func(ev InboundEvent)
 }
 
@@ -111,6 +118,10 @@ func (s *Server) dispatch(ev InboundEvent) {
 	case "motion":
 		if s.handlers.OnMotion != nil {
 			s.handlers.OnMotion(ev)
+		}
+	case "draw":
+		if s.handlers.OnDraw != nil {
+			s.handlers.OnDraw(ev)
 		}
 	case "action":
 		if s.handlers.OnAction != nil {

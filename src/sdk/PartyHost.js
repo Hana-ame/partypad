@@ -83,7 +83,7 @@ export class PartyHost {
    * Attach an incoming PeerJS DataConnection (also callable directly in unit tests).
    */
   _handleIncomingConn(conn) {
-    const requestedMode = conn.metadata?.transport || this.transportMode;
+    const requestedMode = conn.metadata?.transport === TRANSPORT_MODE.KCP ? TRANSPORT_MODE.KCP : TRANSPORT_MODE.DUAL_DC;
     let boundPlayerId = null;
 
     const transport = new PeerTransport(conn, {
@@ -109,6 +109,12 @@ export class PartyHost {
             this._emit('privateAck', boundPlayerId, msg.msgId);
           } else if (msg.t === MSG.ACTION) {
             this._emit('action', boundPlayerId, { id: msg.id, value: msg.value });
+          } else if (msg.t === MSG.DRAW) {
+            this._emit('draw', boundPlayerId, msg, player);
+          } else if (msg.t === MSG.SET_TRANSPORT && msg.mode) {
+            const next = transport.setMode(msg.mode);
+            player.transportMode = next;
+            this._emit('transportChange', boundPlayerId, next);
           }
         },
         onInput: (frame) => {
@@ -118,6 +124,13 @@ export class PartyHost {
           player.lastSeen = Date.now();
           player.input = frame;
           this._emit('input', boundPlayerId, frame, player);
+        },
+        onDraw: (frame) => {
+          if (!boundPlayerId) return;
+          const player = this.players.get(boundPlayerId);
+          if (!player) return;
+          player.lastSeen = Date.now();
+          this._emit('draw', boundPlayerId, frame, player);
         },
         onMotion: (frame) => {
           if (!boundPlayerId) return;
@@ -133,6 +146,14 @@ export class PartyHost {
           if (player && player.transport === transport) {
             player.connected = false;
             this._emit('playerLeave', boundPlayerId, player);
+          }
+        },
+        onModeChange: (mode) => {
+          if (!boundPlayerId) return;
+          const player = this.players.get(boundPlayerId);
+          if (player) {
+            player.transportMode = mode;
+            this._emit('transportChange', boundPlayerId, mode);
           }
         },
         onError: (err) => this._emit('error', err),
@@ -276,6 +297,30 @@ export class PartyHost {
     if (player?.connected) {
       player.transport.sendControl({ t: MSG.VIBRATE, pattern });
     }
+  }
+
+  /**
+   * Hot-switch transport mode ('dual-dc' | 'kcp') for all connected players without disconnecting.
+   */
+  setTransportMode(mode) {
+    const normalized = mode === TRANSPORT_MODE.KCP ? TRANSPORT_MODE.KCP : TRANSPORT_MODE.DUAL_DC;
+    this.transportMode = normalized;
+    for (const player of this.players.values()) {
+      this.setPlayerTransportMode(player.id, normalized);
+    }
+  }
+
+  setPlayerTransportMode(playerId, mode) {
+    const player = this.players.get(playerId);
+    if (!player) return false;
+    const normalized = mode === TRANSPORT_MODE.KCP ? TRANSPORT_MODE.KCP : TRANSPORT_MODE.DUAL_DC;
+    player.transportMode = normalized;
+    if (player.connected && player.transport) {
+      player.transport.setMode(normalized);
+      player.transport.sendControl({ t: MSG.SET_TRANSPORT, mode: normalized }, { forcePrimary: true });
+    }
+    this._emit('transportChange', playerId, normalized);
+    return true;
   }
 
   getPlayers() {

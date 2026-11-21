@@ -56,6 +56,8 @@ async function connectAsPhone(roomCode, name, transport, fromUserGesture = false
     controller.on('ping', (ms) => {
       $('#pad-ping').textContent = `${ms} ms`;
     });
+    controller.on('transportChange', (mode) => syncKcpUI(mode));
+    syncKcpUI(transport);
     controller.on('disconnect', () => {
       $('#pad-ping').textContent = '已断开';
     });
@@ -74,6 +76,7 @@ async function connectAsPhone(roomCode, name, transport, fromUserGesture = false
       addBtnBtn: $('#add-btn'),
       addDpadBtn: $('#add-dpad'),
       addTextBtn: $('#add-text'),
+      addDrawBtn: $('#add-draw'),
       mirrorBtn: $('#pad-mirror'),
       resetBtn: $('#pad-reset-layout'),
       textToggleBtn: $('#pad-text-toggle'),
@@ -93,15 +96,41 @@ async function connectAsPhone(roomCode, name, transport, fromUserGesture = false
 $('#join-submit').onclick = () => {
   const code = normalizeRoomCode($('#join-code').value);
   const name = $('#join-name').value.trim();
-  const transport = $('#join-transport').value;
-  if (code.length < 5) {
-    $('#join-error').textContent = '请输入完整的 5 位房间码';
+  const transport = localStorage.getItem('partypad_kcp_pref') === '1' ? TRANSPORT_MODE.KCP : TRANSPORT_MODE.DUAL_DC;
+  if (code.length < 4) {
+    $('#join-error').textContent = '请输入房间码（默认 6 位）';
     return;
   }
   connectAsPhone(code, name, transport, true);
 };
 
 $('#pad-fs-btn').onclick = () => enterFullscreenLandscape();
+
+const settingsDrawer = $('#pad-settings-drawer');
+const kcpSwitch = $('#pad-kcp-switch');
+const kcpStatus = $('#pad-kcp-status');
+const syncKcpUI = (mode) => {
+  const isKcp = mode === TRANSPORT_MODE.KCP;
+  kcpSwitch.checked = isKcp;
+  kcpStatus.textContent = isKcp ? '当前：KCP over Unreliable DC（已热启用）' : '当前：Dual-Channel WebRTC';
+};
+
+$('#pad-settings-btn').onclick = () => {
+  const hidden = settingsDrawer.classList.toggle('hidden');
+  $('#pad-settings-btn').classList.toggle('active', !hidden);
+  if (controller) syncKcpUI(controller.transportMode);
+};
+$('#pad-settings-close').onclick = () => {
+  settingsDrawer.classList.add('hidden');
+  $('#pad-settings-btn').classList.remove('active');
+};
+kcpSwitch.onchange = () => {
+  if (!controller) return;
+  const next = kcpSwitch.checked ? TRANSPORT_MODE.KCP : TRANSPORT_MODE.DUAL_DC;
+  try { localStorage.setItem('partypad_kcp_pref', kcpSwitch.checked ? '1' : '0'); } catch {}
+  controller.setTransportMode(next);
+  syncKcpUI(next);
+};
 
 $('#rotate-dismiss').onclick = () => {
   $('#rotate-hint').classList.add('dismissed');
@@ -124,13 +153,10 @@ function handleHashRoute() {
     const qIdx = hash.indexOf('?');
     const params = new URLSearchParams(qIdx >= 0 ? hash.slice(qIdx + 1) : '');
     const room = normalizeRoomCode(params.get('room'));
-    const transport = params.get('transport') === TRANSPORT_MODE.KCP
-      ? TRANSPORT_MODE.KCP
-      : TRANSPORT_MODE.DUAL_DC;
+    const transport = localStorage.getItem('partypad_kcp_pref') === '1' ? TRANSPORT_MODE.KCP : TRANSPORT_MODE.DUAL_DC;
 
     $('#join-code').value = room;
-    $('#join-transport').value = transport;
-    if (room.length === 5) {
+    if (room.length >= 4) {
       connectAsPhone(room, '', transport, false);
     }
   }

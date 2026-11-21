@@ -1,3 +1,4 @@
+import { DRAW_OP } from '../core/constants.js';
 import {
   LAYOUT_PRESETS,
   loadCustomLayout,
@@ -81,6 +82,15 @@ export class ControllerUI {
       label: 'DIR',
       x: 10, y: 24, w: 24, h: 60,
     });
+
+    if (this.els.addDrawBtn) {
+      this.els.addDrawBtn.onclick = () => this._addControl({
+        id: `draw_${this.customSeq++}`,
+        type: 'draw_pad',
+        label: '画板',
+        x: 6, y: 6, w: 88, h: 88,
+      });
+    }
 
     this.els.addTextBtn.onclick = () => this._addControl({
       id: `txt_${this.customSeq++}`,
@@ -271,6 +281,8 @@ export class ControllerUI {
         this._buildActionButton(wrap, ctrl);
       } else if (ctrl.type === 'text_input') {
         this._buildTextInput(wrap, ctrl);
+      } else if (ctrl.type === 'draw_pad') {
+        this._buildDrawPad(wrap, ctrl);
       }
 
       if (this.editMode) {
@@ -415,6 +427,157 @@ export class ControllerUI {
       this.controller.sendAction(ctrl.actionId || ctrl.id, ctrl.value);
       this.controller.imu.vibrate(25);
       setTimeout(() => btn.classList.remove('pressed'), 120);
+    };
+  }
+
+
+  _buildDrawPad(wrap) {
+    const container = document.createElement('div');
+    container.className = 'draw-wrap';
+
+    const tools = document.createElement('div');
+    tools.className = 'draw-tools';
+
+    const colors = ['#ffffff', '#ef4444', '#f59e0b', '#22c55e', '#38bdf8', '#a855f7', '#0f172a'];
+    let activeColor = '#ffffff';
+    let activeWidth = 5;
+    let strokeSeq = 1;
+    const strokes = []; // { id, color, width, pts: [{x,y}] }
+
+    const swatches = colors.map((col, idx) => {
+      const sw = document.createElement('button');
+      sw.type = 'button';
+      sw.className = 'draw-swatch' + (idx === 0 ? ' active' : '');
+      sw.style.background = col;
+      sw.title = col === '#0f172a' ? '橡皮擦' : col;
+      sw.onclick = () => {
+        activeColor = col;
+        swatches.forEach((b) => b.classList.remove('active'));
+        sw.classList.add('active');
+      };
+      tools.appendChild(sw);
+      return sw;
+    });
+
+    const sizeBtn = document.createElement('button');
+    sizeBtn.type = 'button';
+    sizeBtn.className = 'btn sm';
+    sizeBtn.textContent = '笔粗: 中';
+    const sizes = [
+      { label: '笔粗: 细', w: 2 },
+      { label: '笔粗: 中', w: 5 },
+      { label: '笔粗: 粗', w: 12 },
+    ];
+    let sizeIdx = 1;
+    sizeBtn.onclick = () => {
+      sizeIdx = (sizeIdx + 1) % sizes.length;
+      activeWidth = sizes[sizeIdx].w;
+      sizeBtn.textContent = sizes[sizeIdx].label;
+    };
+
+    const undoBtn = document.createElement('button');
+    undoBtn.type = 'button';
+    undoBtn.className = 'btn sm';
+    undoBtn.textContent = '撤销';
+
+    const clearBtn = document.createElement('button');
+    clearBtn.type = 'button';
+    clearBtn.className = 'btn sm ghost';
+    clearBtn.textContent = '清空';
+
+    tools.appendChild(sizeBtn);
+    tools.appendChild(undoBtn);
+    tools.appendChild(clearBtn);
+
+    const canvas = document.createElement('canvas');
+    canvas.className = 'draw-canvas';
+    container.appendChild(tools);
+    container.appendChild(canvas);
+    wrap.appendChild(container);
+
+    const ctx = canvas.getContext('2d');
+    const redrawAll = () => {
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const targetW = Math.round(rect.width * dpr);
+      const targetH = Math.round(rect.height * dpr);
+      if (canvas.width !== targetW || canvas.height !== targetH) {
+        canvas.width = targetW;
+        canvas.height = targetH;
+      }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(0, 0, rect.width, rect.height);
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      for (const st of strokes) {
+        if (st.pts.length === 0) continue;
+        ctx.strokeStyle = st.color;
+        ctx.lineWidth = st.width;
+        ctx.beginPath();
+        ctx.moveTo(st.pts[0].x * rect.width, st.pts[0].y * rect.height);
+        for (let i = 1; i < st.pts.length; i++) {
+          ctx.lineTo(st.pts[i].x * rect.width, st.pts[i].y * rect.height);
+        }
+        ctx.stroke();
+      }
+    };
+
+    requestAnimationFrame(redrawAll);
+    if (this.editMode) return;
+
+    undoBtn.onclick = () => {
+      const popped = strokes.pop();
+      if (!popped) return;
+      redrawAll();
+      this.controller.sendDraw({ op: DRAW_OP.UNDO, strokeId: popped.id });
+    };
+
+    clearBtn.onclick = () => {
+      strokes.length = 0;
+      redrawAll();
+      this.controller.sendDraw({ op: DRAW_OP.CLEAR });
+    };
+
+    let drawingPtr = null;
+    let currentStroke = null;
+    const normPoint = (ev) => {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: Math.max(0, Math.min(1, (ev.clientX - rect.left) / Math.max(1, rect.width))),
+        y: Math.max(0, Math.min(1, (ev.clientY - rect.top) / Math.max(1, rect.height))),
+      };
+    };
+
+    canvas.onpointerdown = (ev) => {
+      ev.preventDefault();
+      drawingPtr = ev.pointerId;
+      canvas.setPointerCapture(ev.pointerId);
+      const pt = normPoint(ev);
+      const id = strokeSeq++;
+      currentStroke = { id, color: activeColor, width: activeWidth, pts: [pt] };
+      strokes.push(currentStroke);
+      redrawAll();
+      this.controller.sendDraw({ op: DRAW_OP.START, x: pt.x, y: pt.y, color: activeColor, width: activeWidth, strokeId: id });
+    };
+
+    canvas.onpointermove = (ev) => {
+      if (ev.pointerId !== drawingPtr || !currentStroke) return;
+      const pt = normPoint(ev);
+      const prev = currentStroke.pts[currentStroke.pts.length - 1];
+      if (Math.hypot(pt.x - prev.x, pt.y - prev.y) < 0.003) return;
+      currentStroke.pts.push(pt);
+      redrawAll();
+      this.controller.sendDraw({ op: DRAW_OP.MOVE, x: pt.x, y: pt.y, color: currentStroke.color, width: currentStroke.width, strokeId: currentStroke.id });
+    };
+
+    canvas.onpointerup = canvas.onpointercancel = (ev) => {
+      if (ev.pointerId !== drawingPtr || !currentStroke) return;
+      const pt = normPoint(ev);
+      this.controller.sendDraw({ op: DRAW_OP.END, x: pt.x, y: pt.y, color: currentStroke.color, width: currentStroke.width, strokeId: currentStroke.id });
+      drawingPtr = null;
+      currentStroke = null;
     };
   }
 

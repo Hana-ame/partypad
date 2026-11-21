@@ -14,16 +14,9 @@
     <section id="view-join" class="view active">
       <div class="join-card">
         <h1>PartyPad</h1>
-        <p class="muted">扫码或手动输入 5 位房间码直连主机（进入后自动全屏横屏）</p>
-        <input id="join-code" class="input code-input" maxlength="5" placeholder="5 位房间码" autocomplete="off" />
+        <p class="muted">扫码或手动输入 6 位房间码直连主机（进入后自动全屏横屏）</p>
+        <input id="join-code" class="input code-input" maxlength="8" placeholder="6 位房间码" autocomplete="off" />
         <input id="join-name" class="input" maxlength="16" placeholder="你的昵称（可选）" />
-        <label class="inline-opt full">
-          传输协议
-          <select id="join-transport">
-            <option value="dual-dc">Dual-Channel WebRTC（默认）</option>
-            <option value="kcp">KCP over Unreliable DC（可选优化）</option>
-          </select>
-        </label>
         <button id="join-submit" class="btn primary full">进入全屏横屏手柄</button>
         <p id="join-error" class="error-text"></p>
       </div>
@@ -41,6 +34,7 @@
           <button id="pad-imu-toggle" class="btn sm">体感: 关</button>
           <button id="pad-imu-calib" class="btn sm hidden">校准正面</button>
           <button id="pad-edit-toggle" class="btn sm">编辑布局</button>
+          <button id="pad-settings-btn" class="btn sm">设置</button>
           <button id="pad-fs-btn" class="btn sm">全屏</button>
           <button id="pad-leave" class="btn sm ghost">退出</button>
         </div>
@@ -54,12 +48,23 @@
         <button id="add-btn" class="btn sm">+ 按键</button>
         <button id="add-dpad" class="btn sm">+ 十字键</button>
         <button id="add-text" class="btn sm">+ 文本输入</button>
+        <button id="add-draw" class="btn sm">+ 绘板</button>
         <button id="pad-mirror" class="btn sm">左右镜像</button>
         <button id="pad-reset-layout" class="btn sm ghost">恢复默认</button>
       </div>
 
       <!-- Private Message Banner / Hold-to-Reveal Card -->
       <div id="pad-private-box" class="private-box hidden"></div>
+
+      <!-- Settings Drawer (Live KCP Hot-Switch) -->
+      <div id="pad-settings-drawer" class="settings-drawer hidden">
+        <label class="check-row" style="margin:0">
+          <input id="pad-kcp-switch" type="checkbox" />
+          <strong>启用 KCP 传输优化（热切换，不断连）</strong>
+        </label>
+        <span id="pad-kcp-status" class="muted">当前：Dual-Channel WebRTC</span>
+        <button id="pad-settings-close" class="btn sm ghost">收起</button>
+      </div>
 
       <!-- Quick Text Input Drawer (Always available for party games) -->
       <div id="pad-text-drawer" class="text-drawer hidden">

@@ -57,6 +57,9 @@ export class PartyPadNodeServer extends EventEmitter {
       case 'motion':
         this.emit('motion', ev);
         break;
+      case 'draw':
+        this.emit('draw', ev);
+        break;
       case 'action':
         this.emit('action', ev);
         break;

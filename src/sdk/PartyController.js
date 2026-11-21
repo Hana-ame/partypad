@@ -5,7 +5,8 @@ import {
   normalizeRoomCode,
   getOrCreateClientId,
 } from '../core/constants.js';
-import { encodeInput, encodeMotion } from '../core/codec.js';
+import { encodeInput, encodeMotion, encodeDraw } from '../core/codec.js';
+import { DRAW_OP } from '../core/constants.js';
 import { PeerTransport } from '../core/transport.js';
 import { ImuSensor } from '../sensor/imu.js';
 
@@ -29,6 +30,7 @@ export class PartyController {
 
     this.inputSeq = 1;
     this.motionSeq = 1;
+    this.drawSeq = 1;
     this.inputState = { buttons: 0, lx: 0, ly: 0, rx: 0, ry: 0 };
     this.inputDirty = false;
     this.inputTimer = null;
@@ -114,6 +116,12 @@ export class PartyController {
       case MSG.LAYOUT:
         if (msg.layout) this._emit('layout', msg.layout);
         break;
+      case MSG.SET_TRANSPORT:
+        if (msg.mode && this.transport) {
+          this.transportMode = this.transport.setMode(msg.mode);
+          this._emit('transportChange', this.transportMode);
+        }
+        break;
       case MSG.PRIVATE_MSG:
         this._emit('privateMessage', msg);
         this.imu.vibrate([30, 40, 30]);
@@ -157,6 +165,38 @@ export class PartyController {
       this.inputState.ly = y;
     }
     this.inputDirty = true;
+  }
+
+  /**
+   * Hot-switch between 'dual-dc' and 'kcp' live in settings without disconnecting.
+   */
+  setTransportMode(mode) {
+    const normalized = mode === TRANSPORT_MODE.KCP ? TRANSPORT_MODE.KCP : TRANSPORT_MODE.DUAL_DC;
+    this.transportMode = normalized;
+    if (this.transport) {
+      this.transport.setMode(normalized);
+      this.transport.sendControl({ t: MSG.SET_TRANSPORT, mode: normalized }, { forcePrimary: true });
+    }
+    this._emit('transportChange', normalized);
+    return normalized;
+  }
+
+  getTransportStats() {
+    return this.transport?.getStats() || { mode: this.transportMode, fastChannelOpen: false, kcp: null };
+  }
+
+  /**
+   * Stream real-time drawing events:
+   * - MOVE points go as 14-byte binary realtime frames (zero lag)
+   * - START / END / CLEAR / UNDO go over reliable control channel (or KCP)
+   */
+  sendDraw({ op, x = 0, y = 0, color = '#ffffff', width = 4, strokeId = 0 }) {
+    if (!this.transport) return;
+    if (op === DRAW_OP.MOVE) {
+      this.transport.sendRealtime(encodeDraw({ seq: this.drawSeq++, op, x, y, color, width, strokeId }));
+    } else {
+      this.transport.sendControl({ t: MSG.DRAW, op, x, y, color, width, strokeId });
+    }
   }
 
   sendAction(id, value) {

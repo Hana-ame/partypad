@@ -8,6 +8,8 @@ import {
   encodeControl,
   decodeControl,
   isNewerSeq,
+  encodeDraw,
+  decodeDraw,
 } from '../src/core/codec.js';
 
 test('Input binary codec round-trip (16 bytes)', () => {
@@ -53,4 +55,25 @@ test('Control JSON codec & sequence wraparound comparison', () => {
   assert.equal(isNewerSeq(4, 5), false);
   assert.equal(isNewerSeq(0, 65535), true); // uint16 wraparound
   assert.equal(isNewerSeq(65535, 0), false);
+});
+
+test('Drawing stroke binary codec round-trip (14 bytes)', () => {
+  const pkt = encodeDraw({
+    seq: 77,
+    op: 1,
+    x: 0.42,
+    y: 0.78,
+    color: '#38bdf8',
+    width: 8,
+    strokeId: 12,
+  });
+  assert.equal(pkt.byteLength, 14);
+  const decoded = decodeDraw(pkt);
+  assert.equal(decoded.seq, 77);
+  assert.equal(decoded.op, 1);
+  assert.ok(Math.abs(decoded.x - 0.42) < 0.001);
+  assert.ok(Math.abs(decoded.y - 0.78) < 0.001);
+  assert.equal(decoded.color, '#38bdf8');
+  assert.equal(decoded.width, 8);
+  assert.equal(decoded.strokeId, 12);
 });

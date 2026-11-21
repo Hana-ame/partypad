@@ -6,7 +6,6 @@ const hostUI = new HostDashboardUI({
   qr: $('#host-qr'),
   code: $('#host-code'),
   status: $('#host-status'),
-  transportSelect: $('#host-transport'),
   newRoomBtn: $('#host-new-room'),
   layoutBtns: [...document.querySelectorAll('.layout-btn')],
   pmTarget: $('#pm-target'),
@@ -16,6 +15,7 @@ const hostUI = new HostDashboardUI({
   pmSendBtn: $('#pm-send'),
   playersEl: $('#host-players'),
   logEl: $('#host-log'),
+  drawCanvas: $('#host-draw-canvas'),
   wsUrlInput: $('#ws-bridge-url'),
   wsConnectBtn: $('#ws-bridge-connect'),
 });

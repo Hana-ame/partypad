@@ -28,6 +28,7 @@ namespace PartyPad
         public event Action<PartyPadEvent> OnInput;
         public event Action<PartyPadEvent> OnMotion;
         public event Action<PartyPadEvent> OnAction;
+        public event Action<PartyPadEvent> OnDraw;
         public event Action<PartyPadEvent> OnPrivateAck;
 
         private readonly ConcurrentQueue<string> _inboundQueue = new ConcurrentQueue<string>();
@@ -133,6 +134,9 @@ namespace PartyPad
                     break;
                 case "motion":
                     OnMotion?.Invoke(ev);
+                    break;
+                case "draw":
+                    OnDraw?.Invoke(ev);
                     break;
                 case "action":
                     OnAction?.Invoke(ev);

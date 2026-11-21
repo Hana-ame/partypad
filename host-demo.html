@@ -12,13 +12,6 @@
       <header class="topbar">
         <div class="brand">PartyPad 测试用大屏（示例 Host）</div>
         <div class="topbar-actions">
-          <label class="inline-opt">
-            传输层
-            <select id="host-transport">
-              <option value="dual-dc">Dual-Channel WebRTC（默认）</option>
-              <option value="kcp">KCP over Unreliable DC（可选优化）</option>
-            </select>
-          </label>
           <button id="host-new-room" class="btn">重建房间</button>
         </div>
       </header>
@@ -44,6 +37,7 @@
               <button class="btn layout-btn" data-layout="action_gamepad">单摇杆 + ABXY</button>
               <button class="btn layout-btn" data-layout="motion_party">体感 + 技能键</button>
               <button class="btn layout-btn" data-layout="party_quiz">抢答 + 文本输入</button>
+              <button class="btn layout-btn primary" data-layout="draw_board">热切为实时绘板</button>
             </div>
           </div>
 
@@ -72,6 +66,10 @@
             <div id="host-players" class="players-grid">
               <div class="muted">等待手机扫码或输入房间码加入…</div>
             </div>
+          </div>
+          <div class="panel">
+            <h3>实时绘板同步预览画布</h3>
+            <canvas id="host-draw-canvas" class="host-draw-canvas" width="640" height="320"></canvas>
           </div>
           <div class="panel">
             <h3>事件日志（含文本提交 / 动作 / 私密签收）</h3>

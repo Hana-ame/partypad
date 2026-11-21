@@ -4,28 +4,24 @@ import {
   decodeControl,
   decodeInput,
   decodeMotion,
+  decodeDraw,
   isNewerSeq,
   toUint8Array,
 } from './codec.js';
 import { KcpSession } from './kcp.js';
 
 /**
- * Unified Transport Wrapper over a PeerJS DataConnection.
+ * Unified Transport Wrapper over a PeerJS DataConnection with ZERO-DISCONNECT KCP Hot-Switching.
  *
- * Mode 1 (Default): 'dual-dc'
- *   - Uses PeerJS's primary reliable DataConnection for critical control messages
- *     (layout updates, private messages, actions, acks).
- *   - Opens a dedicated raw unreliable RTCDataChannel ({ ordered: false, maxRetransmits: 0 })
- *     on the same RTCPeerConnection for 60Hz joystick & IMU frames (zero HoL blocking).
+ * Every datagram on `partypad-fast` ({ ordered: false, maxRetransmits: 0 }) carries a 1-byte wire tag:
+ *   0x00 (WIRE_RAW) -> Unreliable low-latency input / IMU frames (always bypasses KCP)
+ *   0x01 (WIRE_KCP) -> KCP ARQ encapsulated reliable control frames
  *
- * Mode 2 (Optional): 'kcp'
- *   - Runs our pure-JS KCP ARQ session over a raw unreliable RTCDataChannel
- *     ({ ordered: false, maxRetransmits: 0 }) for fast-retransmit reliable control delivery,
- *     while high-frequency input/IMU snapshots bypass KCP with a 1-byte header so they
- *     stay zero-retransmit and drop stale out-of-order frames.
+ * Because both modes share the exact same wire framing, calling `setMode('kcp' | 'dual-dc')`
+ * switches transport live at runtime without closing or re-negotiating the PeerJS connection.
  */
-const WIRE_RAW = 0x00; // Unreliable bypass (input / motion frames)
-const WIRE_KCP = 0x01; // KCP encapsulated reliable control payload
+const WIRE_RAW = 0x00;
+const WIRE_KCP = 0x01;
 
 export class PeerTransport {
   /**
@@ -36,6 +32,7 @@ export class PeerTransport {
     this.conn = conn;
     this.mode = opts.mode || TRANSPORT_MODE.DUAL_DC;
     this.isInitiator = !!opts.isInitiator;
+    this.conv = opts.conv || 0x50414401;
     this.handlers = opts.handlers || {};
     this.fastDc = null;
     this.kcp = null;
@@ -45,7 +42,26 @@ export class PeerTransport {
     this.closed = false;
 
     this._bindPrimaryConn();
-    this._setupFastDataChannel(opts.conv || 0x50414401);
+    this._setupFastDataChannel();
+  }
+
+  /**
+   * Hot-switch between 'dual-dc' and 'kcp' without disconnecting.
+   */
+  setMode(nextMode) {
+    const normalized = nextMode === TRANSPORT_MODE.KCP
+      ? TRANSPORT_MODE.KCP
+      : TRANSPORT_MODE.DUAL_DC;
+    if (this.mode === normalized) return this.mode;
+    this.mode = normalized;
+
+    if (this.mode === TRANSPORT_MODE.KCP) {
+      this._ensureKcp();
+    } else {
+      this._stopKcpTimer();
+    }
+    this.handlers.onModeChange?.(this.mode);
+    return this.mode;
   }
 
   _bindPrimaryConn() {
@@ -68,7 +84,7 @@ export class PeerTransport {
     this.conn.on('error', (err) => this.handlers.onError?.(err));
   }
 
-  _setupFastDataChannel(conv) {
+  _setupFastDataChannel() {
     const pc = this.conn.peerConnection;
     if (!pc) return;
 
@@ -78,25 +94,22 @@ export class PeerTransport {
       dc.binaryType = 'arraybuffer';
 
       if (this.mode === TRANSPORT_MODE.KCP) {
-        this._initKcp(conv);
+        this._ensureKcp();
       }
 
       dc.onmessage = (ev) => {
         if (this.closed) return;
         const u8 = toUint8Array(ev.data);
-        if (u8.byteLength === 0) return;
+        if (u8.byteLength < 2) return;
 
-        if (this.mode === TRANSPORT_MODE.KCP) {
-          const wireTag = u8[0];
-          const body = u8.subarray(1);
-          if (wireTag === WIRE_KCP && this.kcp) {
-            this.kcp.input(body);
-            this._drainKcp();
-          } else if (wireTag === WIRE_RAW) {
-            this._dispatchBinary(body);
-          }
-        } else {
-          this._dispatchBinary(u8);
+        const wireTag = u8[0];
+        const body = u8.subarray(1);
+        if (wireTag === WIRE_KCP) {
+          this._ensureKcp();
+          this.kcp.input(body);
+          this._drainKcp();
+        } else if (wireTag === WIRE_RAW) {
+          this._dispatchBinary(body);
         }
       };
 
@@ -113,7 +126,6 @@ export class PeerTransport {
         });
         attachDc(dc);
       } catch (err) {
-        // Fallback gracefully to primary PeerJS channel if browser rejects extra DC
         console.warn('[PartyPad] Could not create fast DataChannel, falling back:', err);
       }
     } else {
@@ -128,24 +140,32 @@ export class PeerTransport {
     }
   }
 
-  _initKcp(conv) {
-    this.kcp = new KcpSession(conv, (kcpPacket) => {
-      if (this.fastDc?.readyState === 'open') {
-        const frame = new Uint8Array(1 + kcpPacket.byteLength);
-        frame[0] = WIRE_KCP;
-        frame.set(kcpPacket, 1);
-        this.fastDc.send(frame);
-      }
-    });
-    this.kcp.setNoDelay(1, 10, 2, 1);
-    this.kcp.setMtu(1100);
+  _ensureKcp() {
+    if (!this.kcp) {
+      this.kcp = new KcpSession(this.conv, (kcpPacket) => {
+        if (this.fastDc?.readyState === 'open') {
+          const frame = new Uint8Array(1 + kcpPacket.byteLength);
+          frame[0] = WIRE_KCP;
+          frame.set(kcpPacket, 1);
+          this.fastDc.send(frame);
+        }
+      });
+      this.kcp.setNoDelay(1, 10, 2, 1);
+      this.kcp.setMtu(1100);
+    }
 
+    if (!this.kcpTimer && !this.closed) {
+      this.kcpTimer = setInterval(() => {
+        if (!this.kcp || this.closed) return;
+        this.kcp.update(Math.floor(performance.now()));
+        this._drainKcp();
+      }, 10);
+    }
+  }
+
+  _stopKcpTimer() {
     clearInterval(this.kcpTimer);
-    this.kcpTimer = setInterval(() => {
-      if (!this.kcp || this.closed) return;
-      this.kcp.update(Math.floor(performance.now()));
-      this._drainKcp();
-    }, 10);
+    this.kcpTimer = null;
   }
 
   _drainKcp() {
@@ -171,6 +191,9 @@ export class PeerTransport {
         this.lastMotionSeq = frame.seq;
         this.handlers.onMotion?.(frame);
       }
+    } else if (tag === PKT.DRAW) {
+      const frame = decodeDraw(u8);
+      if (frame) this.handlers.onDraw?.(frame);
     } else if (tag === PKT.CONTROL) {
       const obj = decodeControl(u8);
       if (obj) this.handlers.onControl?.(obj);
@@ -181,9 +204,9 @@ export class PeerTransport {
    * Reliable delivery (layouts, private messages, actions, acks).
    * Uses KCP when mode === 'kcp' and fastDc is open; otherwise PeerJS reliable DC.
    */
-  sendControl(obj) {
+  sendControl(obj, { forcePrimary = false } = {}) {
     if (this.closed) return;
-    if (this.mode === TRANSPORT_MODE.KCP && this.kcp && this.fastDc?.readyState === 'open') {
+    if (!forcePrimary && this.mode === TRANSPORT_MODE.KCP && this.kcp && this.fastDc?.readyState === 'open') {
       this.kcp.send(encodeControl(obj));
       this.kcp.update(Math.floor(performance.now()));
       return;
@@ -200,17 +223,12 @@ export class PeerTransport {
     if (this.closed) return;
     const u8 = toUint8Array(bytes);
     if (this.fastDc?.readyState === 'open') {
-      if (this.mode === TRANSPORT_MODE.KCP) {
-        const frame = new Uint8Array(1 + u8.byteLength);
-        frame[0] = WIRE_RAW;
-        frame.set(u8, 1);
-        this.fastDc.send(frame);
-      } else {
-        this.fastDc.send(u8);
-      }
+      const frame = new Uint8Array(1 + u8.byteLength);
+      frame[0] = WIRE_RAW;
+      frame.set(u8, 1);
+      this.fastDc.send(frame);
       return;
     }
-    // Graceful fallback before fastDc opens
     if (this.conn?.open) {
       this.conn.send(u8);
     }
@@ -227,7 +245,7 @@ export class PeerTransport {
   close() {
     if (this.closed) return;
     this.closed = true;
-    clearInterval(this.kcpTimer);
+    this._stopKcpTimer();
     try { this.fastDc?.close(); } catch { /* noop */ }
     try { this.conn?.close(); } catch { /* noop */ }
   }
@@ -235,7 +253,7 @@ export class PeerTransport {
   _handleClose() {
     if (this.closed) return;
     this.closed = true;
-    clearInterval(this.kcpTimer);
+    this._stopKcpTimer();
     this.handlers.onClose?.();
   }
 }

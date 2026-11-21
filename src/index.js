@@ -9,6 +9,7 @@ export { LAYOUT_PRESETS } from './layouts/presets.js';
 export {
   PEER_PREFIX,
   MSG,
+  DRAW_OP,
   PKT,
   TRANSPORT_MODE,
   genRoomCode,
@@ -22,4 +23,6 @@ export {
   decodeMotion,
   encodeControl,
   decodeControl,
+  encodeDraw,
+  decodeDraw,
 } from './core/codec.js';

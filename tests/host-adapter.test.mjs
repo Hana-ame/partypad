@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { PartyHost } from '../src/sdk/PartyHost.js';
 import { attachGamepadAPIAdapter } from '../src/sdk/adapters/GamepadAPIAdapter.js';
 import { ServerBridgeAdapter } from '../src/sdk/adapters/ServerBridgeAdapter.js';
-import { encodeInput } from '../src/core/codec.js';
-import { MSG, TRANSPORT_MODE } from '../src/core/constants.js';
+import { encodeInput, encodeDraw } from '../src/core/codec.js';
+import { MSG, TRANSPORT_MODE, DRAW_OP } from '../src/core/constants.js';
 import { LAYOUT_PRESETS } from '../src/layouts/presets.js';
 
 function createMockConn(metadata = {}) {
@@ -111,5 +111,61 @@ test('PartyHost isolates private messages per player, replays on reconnect, and 
 
   bridge.destroy();
   padAdapter.detach();
+  host.destroy();
+});
+
+test('PartyHost is always ready for both WebRTC and KCP simultaneously per player', () => {
+  const host = new PartyHost({ roomCode: 'ABCDEF' }); // zero transport config needed on server
+  const conn1 = createMockConn({ transport: 'dual-dc' });
+  const conn2 = createMockConn({ transport: 'kcp' });
+  host._handleIncomingConn(conn1);
+  host._handleIncomingConn(conn2);
+  conn1.emit('data', { t: MSG.HELLO, clientId: 'p_rtc', name: 'RtcUser' });
+  conn2.emit('data', { t: MSG.HELLO, clientId: 'p_kcp', name: 'KcpUser' });
+
+  assert.equal(host.players.get('p_rtc').transportMode, 'dual-dc');
+  assert.equal(host.players.get('p_kcp').transportMode, 'kcp');
+
+  // Player 1 hot-switches to KCP from phone settings while Player 2 switches to dual-dc
+  conn1.emit('data', { t: MSG.SET_TRANSPORT, mode: TRANSPORT_MODE.KCP });
+  conn2.emit('data', { t: MSG.SET_TRANSPORT, mode: TRANSPORT_MODE.DUAL_DC });
+  assert.equal(host.players.get('p_rtc').transportMode, 'kcp');
+  assert.equal(host.players.get('p_kcp').transportMode, 'dual-dc');
+  assert.equal(host.players.get('p_rtc').connected, true);
+  assert.equal(host.players.get('p_kcp').connected, true);
+
+  host.destroy();
+});
+
+test('PartyHost hot-pushes draw_board layout and streams real-time drawing strokes to ServerBridgeAdapter', () => {
+  const host = new PartyHost({ roomCode: 'DRAW99' });
+  const receivedDraws = [];
+  const bridge = new ServerBridgeAdapter(host, {
+    onDraw: (ev) => receivedDraws.push(ev),
+  });
+
+  const conn = createMockConn({ transport: 'dual-dc' });
+  host._handleIncomingConn(conn);
+  conn.emit('data', { t: MSG.HELLO, clientId: 'p_artist', name: 'Artist' });
+
+  // Hot-push layout change from default gamepad -> draw_board mid-session
+  bridge.setLayout('p_artist', LAYOUT_PRESETS.draw_board);
+  assert.ok(
+    conn.sent.some((m) => m.t === MSG.LAYOUT && m.layout.id === 'draw_board'),
+    'Phone must receive hot-pushed draw_board layout',
+  );
+
+  // Phone streams reliable START + binary realtime MOVE + reliable UNDO
+  conn.emit('data', { t: MSG.DRAW, op: DRAW_OP.START, x: 0.1, y: 0.2, color: '#ef4444', width: 5, strokeId: 1 });
+  conn.emit('data', encodeDraw({ seq: 1, op: DRAW_OP.MOVE, x: 0.5, y: 0.6, color: '#ef4444', width: 5, strokeId: 1 }));
+  conn.emit('data', { t: MSG.DRAW, op: DRAW_OP.UNDO, strokeId: 1 });
+
+  assert.equal(receivedDraws.length, 3);
+  assert.equal(receivedDraws[0].op, DRAW_OP.START);
+  assert.equal(receivedDraws[1].op, DRAW_OP.MOVE);
+  assert.ok(Math.abs(receivedDraws[1].x - 0.5) < 0.001);
+  assert.equal(receivedDraws[2].op, DRAW_OP.UNDO);
+
+  bridge.destroy();
   host.destroy();
 });

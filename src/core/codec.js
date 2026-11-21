@@ -126,3 +126,65 @@ function clampAxis(v) {
   const n = Math.max(-1, Math.min(1, Number(v) || 0));
   return Math.round(n * 32767);
 }
+
+/**
+ * Compact 14-byte Real-Time Drawing Packet (Little-Endian)
+ * [0]      uint8  tag = PKT.DRAW (0x04)
+ * [1]      uint8  op (0=start, 1=move, 2=end, 3=clear, 4=undo)
+ * [2..3]   uint16 seq
+ * [4..5]   uint16 x (normalized 0..1 -> 0..65535)
+ * [6..7]   uint16 y (normalized 0..1 -> 0..65535)
+ * [8..10]  uint8  r, g, b
+ * [11]     uint8  width (1..40)
+ * [12..13] uint16 strokeId
+ */
+export function encodeDraw({ seq = 0, op = 1, x = 0, y = 0, color = '#ffffff', width = 4, strokeId = 0 }) {
+  const buf = new ArrayBuffer(14);
+  const dv = new DataView(buf);
+  const [r, g, b] = parseHexColor(color);
+  dv.setUint8(0, PKT.DRAW);
+  dv.setUint8(1, op & 0xff);
+  dv.setUint16(2, seq & 0xffff, true);
+  dv.setUint16(4, Math.round(Math.max(0, Math.min(1, x)) * 65535), true);
+  dv.setUint16(6, Math.round(Math.max(0, Math.min(1, y)) * 65535), true);
+  dv.setUint8(8, r);
+  dv.setUint8(9, g);
+  dv.setUint8(10, b);
+  dv.setUint8(11, Math.max(1, Math.min(40, Math.round(width))));
+  dv.setUint16(12, strokeId & 0xffff, true);
+  return new Uint8Array(buf);
+}
+
+export function decodeDraw(bytes) {
+  const u8 = toUint8Array(bytes);
+  if (u8.byteLength < 14 || u8[0] !== PKT.DRAW) return null;
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  const r = dv.getUint8(8);
+  const g = dv.getUint8(9);
+  const b = dv.getUint8(10);
+  return {
+    op: dv.getUint8(1),
+    seq: dv.getUint16(2, true),
+    x: dv.getUint16(4, true) / 65535,
+    y: dv.getUint16(6, true) / 65535,
+    color: '#' + [r, g, b].map((v) => v.toString(16).padStart(2, '0')).join(''),
+    width: dv.getUint8(11),
+    strokeId: dv.getUint16(12, true),
+  };
+}
+
+function parseHexColor(hex) {
+  const clean = String(hex || '#ffffff').replace('#', '');
+  if (clean.length === 3) {
+    return [
+      parseInt(clean[0] + clean[0], 16) || 255,
+      parseInt(clean[1] + clean[1], 16) || 255,
+      parseInt(clean[2] + clean[2], 16) || 255,
+    ];
+  }
+  return [
+    parseInt(clean.slice(0, 2), 16) || 0,
+    parseInt(clean.slice(2, 4), 16) || 0,
+    parseInt(clean.slice(4, 6), 16) || 0,
+  ];
+}

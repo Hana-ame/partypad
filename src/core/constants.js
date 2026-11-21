@@ -1,25 +1,37 @@
 export const PEER_PREFIX = 'partypad';
 
-// 5-char unambiguous alphabet (excludes 0/O/1/I/L)
+// 31-char unambiguous alphabet (excludes 0/O/1/I/L)
+// 6 chars => 31^6 = 887,503,681 combinations (~887M)
 export const ROOM_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-export const ROOM_CODE_LEN = 5;
+export const ROOM_CODE_LEN = 6;
 
 // Wire packet tags (first byte of binary frames)
 export const PKT = {
   INPUT: 0x01,   // High-frequency touch/button/joystick state (16 bytes)
-  MOTION: 0x02,  // High-frequency IMU quaternion + omega + swing hit (26 bytes)
+  MOTION: 0x02,  // High-frequency IMU quaternion + omega + swing hit (28 bytes)
   CONTROL: 0x03, // UTF-8 JSON control payload (used over KCP or single-channel mode)
+  DRAW: 0x04,    // High-frequency drawing stroke point (14 bytes)
+};
+
+export const DRAW_OP = {
+  START: 0,
+  MOVE: 1,
+  END: 2,
+  CLEAR: 3,
+  UNDO: 4,
 };
 
 // Control message types
 export const MSG = {
-  HELLO: 'hello',                 // Phone -> Host: { clientId, name, transport, capabilities }
-  WELCOME: 'welcome',             // Host -> Phone: { playerId, slot, roomCode, layout, pendingPrivate }
+  HELLO: 'hello',                 // Phone -> Host: { clientId, name, transport }
+  WELCOME: 'welcome',             // Host -> Phone: { playerId, slot, roomCode, layout, transport, pendingPrivate }
   LAYOUT: 'layout',               // Host -> Phone: { layout }
+  SET_TRANSPORT: 'set_transport', // Bidirectional: hot-switch { mode: 'dual-dc' | 'kcp' }
   PRIVATE_MSG: 'private_msg',     // Host -> Phone: { msgId, title, body, style, secret, ts }
   PRIVATE_ACK: 'private_ack',     // Phone -> Host: { msgId }
   PRIVATE_CLEAR: 'private_clear', // Host -> Phone: { msgId? }
-  ACTION: 'action',               // Phone -> Host: { id, value } (quiz choice, text reply, button event)
+  ACTION: 'action',
+  DRAW: 'draw',                   // Phone -> Host: reliable start/end/clear/undo stroke events               // Phone -> Host: { id, value } (quiz choice, text reply, custom event)
   VIBRATE: 'vibrate',             // Host -> Phone: { pattern }
   CALIBRATE: 'calibrate',         // Bidirectional: reset IMU front reference
   PING: 'ping',                   // Bidirectional: { ts }
@@ -38,27 +50,26 @@ export const IMU_DEFAULTS = {
   SWING_COOLDOWN_MS: 140,
 };
 
-export function genRoomCode() {
+export function genRoomCode(len = ROOM_CODE_LEN) {
   let out = '';
   const buf = new Uint32Array(1);
-  for (let i = 0; i < ROOM_CODE_LEN; i++) {
+  for (let i = 0; i < len; i++) {
     crypto.getRandomValues(buf);
     out += ROOM_CODE_ALPHABET[buf[0] % ROOM_CODE_ALPHABET.length];
   }
   return out;
 }
 
-export function normalizeRoomCode(raw) {
+export function normalizeRoomCode(raw, maxLen = 8) {
   return String(raw || '')
     .toUpperCase()
     .replace(/[^A-Z0-9]/g, '')
-    .slice(0, ROOM_CODE_LEN);
+    .slice(0, maxLen);
 }
 
-export function buildJoinUrl(roomCode, transport = TRANSPORT_MODE.DUAL_DC) {
+export function buildJoinUrl(roomCode) {
   const base = `${window.location.origin}/`;
-  const tParam = transport === TRANSPORT_MODE.KCP ? '&transport=kcp' : '';
-  return `${base}#/pad?room=${encodeURIComponent(roomCode)}${tParam}`;
+  return `${base}#/pad?room=${encodeURIComponent(roomCode)}`;
 }
 
 export function getOrCreateClientId() {

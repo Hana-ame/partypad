@@ -30,6 +30,7 @@ export class FrontendPartyAdapter {
       onPlayerJoin: opts.onPlayerJoin,
       onPlayerLeave: opts.onPlayerLeave,
       onAction: opts.onAction,
+      onDraw: opts.onDraw,
       onMotion: (ev) => {
         if (ev.hit > 0) opts.onSwing?.(ev);
       },

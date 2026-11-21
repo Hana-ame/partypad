@@ -54,6 +54,15 @@ export const LAYOUT_PRESETS = {
     ],
   },
 
+  draw_board: {
+    id: 'draw_board',
+    name: '实时绘板（你画我猜）',
+    imuEnabled: false,
+    controls: [
+      { id: 'main_canvas', type: 'draw_pad', label: '画板', x: 2, y: 2, w: 96, h: 96 },
+    ],
+  },
+
   party_quiz: {
     id: 'party_quiz',
     name: '派对抢答 + 文本输入面板',

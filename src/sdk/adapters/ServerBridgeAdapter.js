@@ -62,6 +62,11 @@ export class ServerBridgeAdapter {
         this.opts.onMotion?.(payload);
         this._sendWs(payload);
       }),
+      this.host.on('draw', (playerId, draw) => {
+        const payload = { type: 'draw', playerId, op: draw.op, x: draw.x, y: draw.y, color: draw.color, width: draw.width, strokeId: draw.strokeId };
+        this.opts.onDraw?.(payload);
+        this._sendWs(payload);
+      }),
       this.host.on('action', (playerId, action) => {
         const payload = { type: 'action', playerId, ...action };
         this.opts.onAction?.(payload);
