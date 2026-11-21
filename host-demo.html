@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PartyPad · 测试用示例大屏（Host Demo）</title>
+  <link rel="stylesheet" href="./src/ui/style.css" />
+</head>
+<body>
+  <div id="app">
+    <section id="view-host" class="view active">
+      <header class="topbar">
+        <div class="brand">PartyPad 测试用大屏（示例 Host）</div>
+        <div class="topbar-actions">
+          <label class="inline-opt">
+            传输层
+            <select id="host-transport">
+              <option value="dual-dc">Dual-Channel WebRTC（默认）</option>
+              <option value="kcp">KCP over Unreliable DC（可选优化）</option>
+            </select>
+          </label>
+          <button id="host-new-room" class="btn">重建房间</button>
+        </div>
+      </header>
+
+      <div class="host-layout">
+        <aside class="host-sidebar">
+          <div class="panel">
+            <h3>扫码或输码加入（纯 PeerJS，无 MQTT）</h3>
+            <div class="qr-box">
+              <canvas id="host-qr"></canvas>
+            </div>
+            <div class="code-row">
+              <span class="code-label">房间码</span>
+              <strong id="host-code" class="room-code">-----</strong>
+            </div>
+            <p id="host-status" class="muted">正在连接 PeerJS 信令…</p>
+          </div>
+
+          <div class="panel">
+            <h3>全局下发手柄布局（测试预设）</h3>
+            <div class="btn-group">
+              <button class="btn layout-btn" data-layout="dual_stick_pro">双摇杆 + 10 键</button>
+              <button class="btn layout-btn" data-layout="action_gamepad">单摇杆 + ABXY</button>
+              <button class="btn layout-btn" data-layout="motion_party">体感 + 技能键</button>
+              <button class="btn layout-btn" data-layout="party_quiz">抢答 + 文本输入</button>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h3>向指定玩家下发私人文本</h3>
+            <select id="pm-target" class="input"></select>
+            <input id="pm-title" class="input" placeholder="标题（如：你的秘密身份）" value="秘密身份" />
+            <textarea id="pm-body" class="input" rows="3" placeholder="仅该玩家手机可见的文本内容…">你是本局的【卧底】，关键词：奶茶</textarea>
+            <label class="check-row">
+              <input id="pm-secret" type="checkbox" checked />
+              防偷窥模式（按住屏幕才显露文本）
+            </label>
+            <button id="pm-send" class="btn primary full">下发私人信息</button>
+          </div>
+
+          <div class="panel">
+            <h3>桥接外部服务端（Go / Node / Unity）</h3>
+            <input id="ws-bridge-url" class="input" placeholder="ws://localhost:8765/partypad" value="ws://localhost:8765/partypad" />
+            <button id="ws-bridge-connect" class="btn full">连接外部服务端 WebSocket</button>
+          </div>
+        </aside>
+
+        <main class="host-main">
+          <div class="panel">
+            <h3>已连接玩家（双摇杆 / 多按键 / 体感实时遥测）</h3>
+            <div id="host-players" class="players-grid">
+              <div class="muted">等待手机扫码或输入房间码加入…</div>
+            </div>
+          </div>
+          <div class="panel">
+            <h3>事件日志（含文本提交 / 动作 / 私密签收）</h3>
+            <pre id="host-log" class="log-box"></pre>
+          </div>
+        </main>
+      </div>
+    </section>
+  </div>
+
+  <script type="module" src="./src/hostDemoMain.js"></script>
+</body>
+</html>

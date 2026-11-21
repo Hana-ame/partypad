@@ -28,7 +28,7 @@ export class PartyHost {
   constructor(opts = {}) {
     this.roomCode = opts.roomCode ? normalizeRoomCode(opts.roomCode) : genRoomCode();
     this.transportMode = opts.transport || TRANSPORT_MODE.DUAL_DC;
-    this.defaultLayout = opts.defaultLayout || LAYOUT_PRESETS.action_gamepad;
+    this.defaultLayout = opts.defaultLayout || LAYOUT_PRESETS.dual_stick_pro;
     this.peerOptions = opts.peerOptions || { debug: 0 };
     this.PeerCtor = opts.PeerCtor || null;
     this.maxPlayers = opts.maxPlayers || 16;

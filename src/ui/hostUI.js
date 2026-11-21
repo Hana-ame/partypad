@@ -30,6 +30,17 @@ export class HostDashboardUI {
       };
     });
 
+    if (this.els.wsConnectBtn) {
+      this.els.wsConnectBtn.onclick = () => {
+        const url = this.els.wsUrlInput?.value?.trim();
+        if (!url || !this.bridge) return;
+        const ws = this.bridge.connectWebSocket(url);
+        ws.onopen = () => this._log(`已连接外部服务端: ${url}`);
+        ws.onerror = () => this._log(`外部服务端连接失败: ${url}`);
+        ws.onclose = () => this._log(`外部服务端连接已关闭: ${url}`);
+      };
+    }
+
     this.els.pmSendBtn.onclick = () => {
       const targetId = this.els.pmTarget.value;
       if (!targetId || !this.bridge) return;
@@ -109,7 +120,7 @@ export class HostDashboardUI {
             <span class="badge">Slot #${p.slot} · ${p.transportMode}</span>
           </div>
           <div class="telemetry">
-            LStick: (${inp.lx.toFixed(2)}, ${inp.ly.toFixed(2)})<br/>
+            L: (${inp.lx.toFixed(2)}, ${inp.ly.toFixed(2)}) · R: (${(inp.rx || 0).toFixed(2)}, ${(inp.ry || 0).toFixed(2)})<br/>
             Buttons: 0x${(inp.buttons >>> 0).toString(16).padStart(4, '0')}<br/>
             ${imuLine}
           </div>

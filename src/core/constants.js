@@ -56,7 +56,7 @@ export function normalizeRoomCode(raw) {
 }
 
 export function buildJoinUrl(roomCode, transport = TRANSPORT_MODE.DUAL_DC) {
-  const base = `${window.location.origin}${window.location.pathname}`;
+  const base = `${window.location.origin}/`;
   const tParam = transport === TRANSPORT_MODE.KCP ? '&transport=kcp' : '';
   return `${base}#/pad?room=${encodeURIComponent(roomCode)}${tParam}`;
 }

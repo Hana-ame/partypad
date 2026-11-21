@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>PartyPad · 纯前端 Canvas 派对游戏接入示例</title>
+  <style>
+    body { margin: 0; background: #0b1020; color: #eef2ff; font-family: system-ui, sans-serif; display: flex; flex-direction: column; height: 100vh; }
+    header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; background: #121a30; border-bottom: 1px solid #243252; }
+    canvas#arena { flex: 1; width: 100%; display: block; }
+    code { color: #38bdf8; font-size: 20px; letter-spacing: 0.16em; }
+    button { background: #3b82f6; color: #fff; border: 0; border-radius: 8px; padding: 7px 14px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>纯前端零后端演示</strong>
+    <span>房间码：<code id="code">-----</code></span>
+    <button id="btn-secret">给所有人发随机私密角色</button>
+    <span id="hint" style="color:#94a3b8;font-size:13px">用手机打开主页输入房间码加入，摇杆移动、A键加速、挥动手机放冲击波</span>
+  </header>
+  <canvas id="arena"></canvas>
+  <script type="module">
+    import { FrontendPartyAdapter } from './FrontendPartyAdapter.js';
+
+    const canvas = document.getElementById('arena');
+    const ctx = canvas.getContext('2d');
+    const positions = new Map();
+    const pulses = [];
+    const palette = ['#38bdf8', '#22c55e', '#f59e0b', '#f43f5e', '#a855f7', '#14b8a6'];
+
+    const party = new FrontendPartyAdapter({
+      transport: 'dual-dc', // 可改为 'kcp'
+      enableGamepadAPI: true,
+      onPlayerJoin: ({ playerId, slot }) => {
+        positions.set(playerId, { x: 180 + slot * 90, y: 240, color: palette[slot % palette.length] });
+      },
+      onSwing: ({ playerId, hit }) => {
+        const pos = positions.get(playerId);
+        if (pos) pulses.push({ x: pos.x, y: pos.y, r: 16, maxR: 70 + hit * 10, color: pos.color });
+        party.vibrate(playerId, [30]);
+      },
+    });
+
+    const { roomCode } = await party.start();
+    document.getElementById('code').textContent = roomCode;
+
+    document.getElementById('btn-secret').onclick = () => {
+      const roles = ['平民', '卧底', '预言家', '守卫'];
+      party.getPlayerStates().forEach((p, idx) => {
+        party.sendPrivate(p.id, {
+          title: '本局秘密身份',
+          body: `你的角色是：【${roles[idx % roles.length]}】`,
+          secret: true,
+        });
+      });
+    };
+
+    function loop() {
+      canvas.width = canvas.clientWidth;
+      canvas.height = canvas.clientHeight;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      for (const p of party.getPlayerStates()) {
+        const pos = positions.get(p.id);
+        if (!pos) continue;
+        const speed = p.isPressed(0) ? 7 : 4;
+        pos.x = Math.max(24, Math.min(canvas.width - 24, pos.x + p.lx * speed));
+        pos.y = Math.max(24, Math.min(canvas.height - 24, pos.y + p.ly * speed));
+
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, 20, 0, Math.PI * 2);
+        ctx.fillStyle = pos.color;
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = '13px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(p.name, pos.x, pos.y - 28);
+      }
+
+      for (let i = pulses.length - 1; i >= 0; i--) {
+        const b = pulses[i];
+        b.r += 4;
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+        ctx.strokeStyle = b.color;
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        if (b.r >= b.maxR) pulses.splice(i, 1);
+      }
+      requestAnimationFrame(loop);
+    }
+    loop();
+  </script>
+</body>
+</html>

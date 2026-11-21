@@ -1,13 +1,10 @@
 import { normalizeRoomCode, TRANSPORT_MODE } from './core/constants.js';
 import { PartyController } from './sdk/PartyController.js';
 import { ControllerUI } from './ui/controllerUI.js';
-import { HostDashboardUI } from './ui/hostUI.js';
 
 const $ = (sel) => document.querySelector(sel);
 
 const views = {
-  home: $('#view-home'),
-  host: $('#view-host'),
   join: $('#view-join'),
   pad: $('#view-pad'),
 };
@@ -18,28 +15,41 @@ function showView(name) {
   });
 }
 
-const hostUI = new HostDashboardUI({
-  qr: $('#host-qr'),
-  code: $('#host-code'),
-  status: $('#host-status'),
-  transportSelect: $('#host-transport'),
-  newRoomBtn: $('#host-new-room'),
-  layoutBtns: [...document.querySelectorAll('.layout-btn')],
-  pmTarget: $('#pm-target'),
-  pmTitle: $('#pm-title'),
-  pmBody: $('#pm-body'),
-  pmSecret: $('#pm-secret'),
-  pmSendBtn: $('#pm-send'),
-  playersEl: $('#host-players'),
-  logEl: $('#host-log'),
-});
+/**
+ * Request fullscreen + lock landscape orientation immediately on user gesture.
+ */
+async function enterFullscreenLandscape() {
+  try {
+    const el = document.documentElement;
+    if (!document.fullscreenElement) {
+      if (el.requestFullscreen) {
+        await el.requestFullscreen({ navigationUI: 'hide' });
+      } else if (el.webkitRequestFullscreen) {
+        el.webkitRequestFullscreen();
+      }
+    }
+  } catch {
+    // Some mobile browsers (e.g. iOS Safari) disallow Fullscreen API
+  }
+  try {
+    if (screen.orientation?.lock) {
+      await screen.orientation.lock('landscape');
+    }
+  } catch {
+    // Fallback CSS portrait hint handles browsers without orientation.lock
+  }
+}
 
 let controller = null;
 let controllerUI = null;
 
-async function connectAsPhone(roomCode, name, transport) {
+async function connectAsPhone(roomCode, name, transport, fromUserGesture = false) {
   const errEl = $('#join-error');
+  if (fromUserGesture) {
+    enterFullscreenLandscape();
+  }
   errEl.textContent = '正在通过 PeerJS 直连 Host…';
+
   try {
     controller?.disconnect();
     controller = new PartyController({ name, transport });
@@ -55,32 +65,30 @@ async function connectAsPhone(roomCode, name, transport) {
     controllerUI = new ControllerUI(controller, {
       stageEl: $('#pad-stage'),
       privateEl: $('#pad-private-box'),
+      editBar: $('#pad-edit-bar'),
       imuToggleBtn: $('#pad-imu-toggle'),
       imuCalibBtn: $('#pad-imu-calib'),
       editBtn: $('#pad-edit-toggle'),
+      addJoyLBtn: $('#add-joy-l'),
+      addJoyRBtn: $('#add-joy-r'),
+      addBtnBtn: $('#add-btn'),
+      addDpadBtn: $('#add-dpad'),
+      addTextBtn: $('#add-text'),
       mirrorBtn: $('#pad-mirror'),
       resetBtn: $('#pad-reset-layout'),
+      textToggleBtn: $('#pad-text-toggle'),
+      textDrawer: $('#pad-text-drawer'),
+      textInput: $('#pad-text-input'),
+      textSendBtn: $('#pad-text-send'),
+      textCloseBtn: $('#pad-text-close'),
     });
+
     errEl.textContent = '';
     showView('pad');
   } catch (err) {
     errEl.textContent = `连接失败：${err.message || err}`;
   }
 }
-
-$('#btn-go-host').onclick = () => {
-  showView('host');
-  hostUI.startRoom();
-};
-
-$('#btn-go-pad').onclick = () => showView('join');
-
-$('#host-back').onclick = () => {
-  hostUI.destroy();
-  showView('home');
-};
-
-$('#join-back').onclick = () => showView('home');
 
 $('#join-submit').onclick = () => {
   const code = normalizeRoomCode($('#join-code').value);
@@ -90,12 +98,22 @@ $('#join-submit').onclick = () => {
     $('#join-error').textContent = '请输入完整的 5 位房间码';
     return;
   }
-  connectAsPhone(code, name, transport);
+  connectAsPhone(code, name, transport, true);
+};
+
+$('#pad-fs-btn').onclick = () => enterFullscreenLandscape();
+
+$('#rotate-dismiss').onclick = () => {
+  $('#rotate-hint').classList.add('dismissed');
 };
 
 $('#pad-leave').onclick = () => {
   controller?.disconnect();
   controller = null;
+  try {
+    if (document.fullscreenElement) document.exitFullscreen();
+    screen.orientation?.unlock?.();
+  } catch { /* noop */ }
   showView('join');
 };
 
@@ -112,9 +130,8 @@ function handleHashRoute() {
 
     $('#join-code').value = room;
     $('#join-transport').value = transport;
-    showView('join');
     if (room.length === 5) {
-      connectAsPhone(room, '', transport);
+      connectAsPhone(room, '', transport, false);
     }
   }
 }

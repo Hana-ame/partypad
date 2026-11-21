@@ -1,0 +1,12 @@
+{
+  "name": "partypad-node-adapter",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node example.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

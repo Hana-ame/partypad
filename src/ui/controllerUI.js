@@ -1,31 +1,32 @@
 import {
   LAYOUT_PRESETS,
-  loadLayoutOverrides,
-  saveLayoutOverrides,
-  clearLayoutOverrides,
-  applyLayoutOverrides,
+  loadCustomLayout,
+  saveCustomLayout,
+  clearCustomLayout,
   mirrorLayoutHorizontally,
 } from '../layouts/presets.js';
 
+const BTN_PALETTE = ['#22c55e', '#ef4444', '#3b82f6', '#eab308', '#a855f7', '#14b8a6', '#f97316', '#ec4899'];
+
 /**
- * Renders the mobile controller stage from a JSON Layout Schema,
- * handles multi-touch joysticks / D-pads / buttons / action choices,
- * supports live drag-and-resize Layout Edit Mode, and renders Hold-to-Reveal private cards.
+ * Renders the landscape fullscreen mobile controller from any Layout Schema.
+ * Supports:
+ *  - Dual joysticks (left + right), arbitrary button counts (bits 0..31), D-pad, action choices, inline text_input
+ *  - Always-available quick text input drawer
+ *  - Live Edit Mode: drag to move, drag handle to resize, freely ADD or DELETE controls, mirror, reset
+ *  - Hold-to-Reveal private message card pushed from Host
  */
 export class ControllerUI {
-  /**
-   * @param {import('../sdk/PartyController.js').PartyController} controller
-   * @param {{ stageEl: HTMLElement, privateEl: HTMLElement, imuToggleBtn: HTMLElement, imuCalibBtn: HTMLElement, editBtn: HTMLElement, mirrorBtn: HTMLElement, resetBtn: HTMLElement }} els
-   */
   constructor(controller, els) {
     this.controller = controller;
     this.els = els;
-    this.baseLayout = LAYOUT_PRESETS.action_gamepad;
+    this.baseLayout = LAYOUT_PRESETS.dual_stick_pro;
     this.activeLayout = structuredClone(this.baseLayout);
     this.editMode = false;
     this.imuActive = false;
     this.latestPrivate = null;
     this.privateRevealed = false;
+    this.customSeq = 1;
 
     this._bindToolbar();
     this._bindControllerEvents();
@@ -38,23 +39,96 @@ export class ControllerUI {
       this.els.stageEl.classList.toggle('editing', this.editMode);
       this.els.editBtn.classList.toggle('active', this.editMode);
       this.els.editBtn.textContent = this.editMode ? '完成编辑' : '编辑布局';
-      this.els.mirrorBtn.classList.toggle('hidden', !this.editMode);
-      this.els.resetBtn.classList.toggle('hidden', !this.editMode);
+      this.els.editBar.classList.toggle('hidden', !this.editMode);
       this._renderStage();
     };
 
+    this.els.addJoyLBtn.onclick = () => this._addControl({
+      id: `joy_l_${this.customSeq++}`,
+      type: 'joystick',
+      stick: 'left',
+      label: 'L',
+      x: 8, y: 26, w: 24, h: 62,
+    });
+
+    this.els.addJoyRBtn.onclick = () => this._addControl({
+      id: `joy_r_${this.customSeq++}`,
+      type: 'joystick',
+      stick: 'right',
+      label: 'R',
+      x: 62, y: 26, w: 24, h: 62,
+    });
+
+    this.els.addBtnBtn.onclick = () => {
+      const nextBit = this._nextFreeButtonBit();
+      const color = BTN_PALETTE[nextBit % BTN_PALETTE.length];
+      this._addControl({
+        id: `btn_${nextBit}_${this.customSeq++}`,
+        type: 'button',
+        bit: nextBit,
+        label: `B${nextBit + 1}`,
+        color,
+        x: 42 + (nextBit % 4) * 5,
+        y: 24 + (nextBit % 3) * 10,
+        w: 12,
+        h: 24,
+      });
+    };
+
+    this.els.addDpadBtn.onclick = () => this._addControl({
+      id: `dpad_${this.customSeq++}`,
+      type: 'dpad',
+      label: 'DIR',
+      x: 10, y: 24, w: 24, h: 60,
+    });
+
+    this.els.addTextBtn.onclick = () => this._addControl({
+      id: `txt_${this.customSeq++}`,
+      type: 'text_input',
+      actionId: 'text_input',
+      placeholder: '输入文本发送到主机…',
+      label: '发送',
+      x: 20, y: 8, w: 60, h: 20,
+    });
+
     this.els.mirrorBtn.onclick = () => {
       this.activeLayout = mirrorLayoutHorizontally(this.activeLayout);
-      this._persistCurrentLayout();
+      saveCustomLayout(this.baseLayout.id, this.activeLayout);
       this._renderStage();
     };
 
     this.els.resetBtn.onclick = () => {
-      clearLayoutOverrides(this.baseLayout.id);
+      clearCustomLayout(this.baseLayout.id);
       this.activeLayout = structuredClone(this.baseLayout);
       this._renderStage();
     };
 
+    // Quick text input drawer
+    this.els.textToggleBtn.onclick = () => {
+      const hidden = this.els.textDrawer.classList.toggle('hidden');
+      this.els.textToggleBtn.classList.toggle('active', !hidden);
+      if (!hidden) this.els.textInput.focus();
+    };
+    this.els.textCloseBtn.onclick = () => {
+      this.els.textDrawer.classList.add('hidden');
+      this.els.textToggleBtn.classList.remove('active');
+    };
+    const submitDrawerText = () => {
+      const val = this.els.textInput.value.trim();
+      if (!val) return;
+      this.controller.sendAction('text_input', val);
+      this.controller.imu.vibrate(20);
+      this.els.textInput.value = '';
+    };
+    this.els.textSendBtn.onclick = submitDrawerText;
+    this.els.textInput.onkeydown = (ev) => {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        submitDrawerText();
+      }
+    };
+
+    // IMU toggle & calibrate
     this.els.imuToggleBtn.onclick = async () => {
       if (!this.imuActive) {
         const ok = await this.controller.enableImu();
@@ -100,19 +174,37 @@ export class ControllerUI {
     });
   }
 
-  renderLayout(layout) {
-    this.baseLayout = structuredClone(layout);
-    const saved = loadLayoutOverrides(layout.id);
-    this.activeLayout = applyLayoutOverrides(this.baseLayout, saved);
+  _addControl(ctrl) {
+    this.activeLayout.controls.push(ctrl);
+    saveCustomLayout(this.baseLayout.id, this.activeLayout);
     this._renderStage();
   }
 
-  _persistCurrentLayout() {
-    const overrides = {};
-    for (const c of this.activeLayout.controls) {
-      overrides[c.id] = { x: c.x, y: c.y, w: c.w, h: c.h };
+  _removeControl(ctrlId) {
+    this.activeLayout.controls = this.activeLayout.controls.filter((c) => c.id !== ctrlId);
+    saveCustomLayout(this.baseLayout.id, this.activeLayout);
+    this._renderStage();
+  }
+
+  _nextFreeButtonBit() {
+    const used = new Set(
+      this.activeLayout.controls
+        .filter((c) => c.type === 'button' && typeof c.bit === 'number')
+        .map((c) => c.bit),
+    );
+    for (let b = 0; b < 32; b++) {
+      if (!used.has(b)) return b;
     }
-    saveLayoutOverrides(this.baseLayout.id, overrides);
+    return 0;
+  }
+
+  renderLayout(layout) {
+    this.baseLayout = structuredClone(layout);
+    const saved = loadCustomLayout(layout.id);
+    this.activeLayout = saved && Array.isArray(saved.controls)
+      ? saved
+      : structuredClone(this.baseLayout);
+    this._renderStage();
   }
 
   _renderPrivateBox() {
@@ -177,14 +269,27 @@ export class ControllerUI {
         this._buildButton(wrap, ctrl);
       } else if (ctrl.type === 'action_btn') {
         this._buildActionButton(wrap, ctrl);
+      } else if (ctrl.type === 'text_input') {
+        this._buildTextInput(wrap, ctrl);
       }
 
-      const handle = document.createElement('div');
-      handle.className = 'resize-handle';
       if (this.editMode) {
+        const delBtn = document.createElement('button');
+        delBtn.className = 'del-handle';
+        delBtn.type = 'button';
+        delBtn.textContent = '×';
+        delBtn.onclick = (ev) => {
+          ev.stopPropagation();
+          this._removeControl(ctrl.id);
+        };
+        wrap.appendChild(delBtn);
+
+        const handle = document.createElement('div');
+        handle.className = 'resize-handle';
         this._attachEditResize(handle, wrap, ctrl);
+        wrap.appendChild(handle);
       }
-      wrap.appendChild(handle);
+
       stage.appendChild(wrap);
     }
   }
@@ -192,8 +297,12 @@ export class ControllerUI {
   _buildJoystick(wrap, ctrl) {
     const base = document.createElement('div');
     base.className = 'joy-base';
+    const tag = document.createElement('span');
+    tag.className = 'joy-tag';
+    tag.textContent = ctrl.label || (ctrl.stick === 'right' ? 'R' : 'L');
     const knob = document.createElement('div');
     knob.className = 'joy-knob';
+    base.appendChild(tag);
     base.appendChild(knob);
     wrap.appendChild(base);
 
@@ -204,7 +313,7 @@ export class ControllerUI {
       const rect = base.getBoundingClientRect();
       const cx = rect.left + rect.width / 2;
       const cy = rect.top + rect.height / 2;
-      const maxR = rect.width * 0.42;
+      const maxR = Math.max(12, rect.width * 0.42);
       let dx = ev.clientX - cx;
       let dy = ev.clientY - cy;
       const dist = Math.hypot(dx, dy);
@@ -309,10 +418,45 @@ export class ControllerUI {
     };
   }
 
+  _buildTextInput(wrap, ctrl) {
+    const box = document.createElement('div');
+    box.className = 'ctrl-text-box';
+    const inp = document.createElement('input');
+    inp.className = 'ctrl-text-input';
+    inp.placeholder = ctrl.placeholder || '输入文本…';
+    inp.disabled = this.editMode;
+    const sendBtn = document.createElement('button');
+    sendBtn.type = 'button';
+    sendBtn.className = 'btn primary sm';
+    sendBtn.textContent = ctrl.label || '发送';
+    sendBtn.disabled = this.editMode;
+
+    if (!this.editMode) {
+      const submit = () => {
+        const val = inp.value.trim();
+        if (!val) return;
+        this.controller.sendAction(ctrl.actionId || ctrl.id, val);
+        this.controller.imu.vibrate(20);
+        inp.value = '';
+      };
+      sendBtn.onclick = submit;
+      inp.onkeydown = (ev) => {
+        if (ev.key === 'Enter') {
+          ev.preventDefault();
+          submit();
+        }
+      };
+    }
+
+    box.appendChild(inp);
+    box.appendChild(sendBtn);
+    wrap.appendChild(box);
+  }
+
   _attachEditDrag(wrap, ctrl) {
     let startX = 0, startY = 0, origX = 0, origY = 0, pid = null;
     wrap.onpointerdown = (ev) => {
-      if (ev.target.classList.contains('resize-handle')) return;
+      if (ev.target.classList.contains('resize-handle') || ev.target.classList.contains('del-handle')) return;
       ev.preventDefault();
       pid = ev.pointerId;
       wrap.setPointerCapture(pid);
@@ -332,7 +476,7 @@ export class ControllerUI {
     wrap.onpointerup = wrap.onpointercancel = (ev) => {
       if (ev.pointerId !== pid) return;
       pid = null;
-      this._persistCurrentLayout();
+      saveCustomLayout(this.baseLayout.id, this.activeLayout);
     };
   }
 
@@ -351,15 +495,15 @@ export class ControllerUI {
     handle.onpointermove = (ev) => {
       if (ev.pointerId !== pid) return;
       const rect = this.els.stageEl.getBoundingClientRect();
-      ctrl.w = Math.max(10, Math.min(60, origW + ((ev.clientX - startX) / rect.width) * 100));
-      ctrl.h = Math.max(12, Math.min(75, origH + ((ev.clientY - startY) / rect.height) * 100));
+      ctrl.w = Math.max(8, Math.min(92, origW + ((ev.clientX - startX) / rect.width) * 100));
+      ctrl.h = Math.max(12, Math.min(82, origH + ((ev.clientY - startY) / rect.height) * 100));
       wrap.style.width = `${ctrl.w}%`;
       wrap.style.height = `${ctrl.h}%`;
     };
     handle.onpointerup = handle.onpointercancel = (ev) => {
       if (ev.pointerId !== pid) return;
       pid = null;
-      this._persistCurrentLayout();
+      saveCustomLayout(this.baseLayout.id, this.activeLayout);
     };
   }
 }
